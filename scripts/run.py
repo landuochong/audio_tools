@@ -1,6 +1,7 @@
 """Start the standalone local UI and two owned model services."""
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -40,6 +41,17 @@ if responding(PORT):
     if '--no-browser' not in sys.argv:
         webbrowser.open(f'http://127.0.0.1:{PORT}')
     raise SystemExit(0)
+
+# Reuse an existing local Ollama, or own one with cloud inference disabled.
+try:
+    urllib.request.urlopen('http://127.0.0.1:11434/api/version', timeout=1).close()
+except Exception:
+    ollama = shutil.which('ollama')
+    if ollama:
+        chat_env = {**os.environ, 'OLLAMA_HOST': '127.0.0.1:11434', 'OLLAMA_NO_CLOUD': '1'}
+        children.append(subprocess.Popen([ollama, 'serve'], env=chat_env))
+    else:
+        print('聊天建议需要 Ollama 和本地 qwen3.5:9b 模型；语音功能可继续使用。', flush=True)
 
 services = [('.venv-tts', 'runtime.tts:app', 8031), ('.venv-asr', 'runtime.asr:app', 8032), ('.venv', 'app.main:app', PORT)]
 for environment, module, port in services:

@@ -1,14 +1,26 @@
 const $=id=>document.getElementById(id);
+let autoSession=null,autoCapture=null,micStarting=false,micAttempt=0;
+let chatContextEditing=false;
 let clip=null,busy=false,recording=false,recorder=null,micStream=null,timer=null,seconds=0,playing=false,streaming=false;
 async function api(path,options={}){const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'请求失败，请稍后再试。');return data;}
 const post=(path,data)=>api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});
 function message(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error);}
-function updateControls(){ $('generate').disabled=busy||recording; $('streamGenerate').disabled=busy||recording||playing; $('play').disabled=!clip||busy||recording||playing; $('recordButton').disabled=busy||playing; $('typeTab').disabled=recording||busy; $('recordTab').disabled=busy; }
+function updateControls(){
+  const pending=Boolean(autoSession?.pending),locked=busy||pending||micStarting;
+  $('generate').disabled=locked||recording||chatContextEditing; $('streamGenerate').disabled=locked||recording||playing||chatContextEditing;
+  $('play').disabled=!clip||locked||recording||playing;
+  $('recordButton').disabled=!recording&&(locked||playing);
+  $('suggestTab').disabled=recording||locked;
+  for(const button of document.querySelectorAll('.use-suggestion'))button.disabled=recording||locked||playing;
+  $('typeTab').disabled=recording||locked; $('recordTab').disabled=locked;
+  for(const id of ['autoMode','autoConvert','micSelect','micRefresh','sensitivity'])$(id).disabled=recording||locked;
+  $('queueStatus').textContent=pending?`还有 ${autoSession.pending} 句正在处理或排队；录音${recording?'持续进行':'已结束'}。`:'';
+}
 function count(){ $('count').textContent=$('text').value.length; }
 $('text').addEventListener('input',count);
 $('example').onclick=()=>{$('text').value='你好，我是露米。今天过得怎么样？如果有想说的话，我就在这里，慢慢听你说。';count();};
-$('typeTab').onclick=()=>{$('textPanel').open=true;$('textPanelToggle').hidden=true;$('recorder').hidden=true;$('typeTab').classList.add('active');$('recordTab').classList.remove('active');};
-$('recordTab').onclick=()=>{$('textPanel').open=false;$('textPanelToggle').hidden=false;$('recorder').hidden=false;$('recordTab').classList.add('active');$('typeTab').classList.remove('active');};
+$('typeTab').onclick=()=>{$('suggestPanel').hidden=true;$('suggestTab').classList.remove('active');$('textPanel').open=true;$('textPanelToggle').hidden=true;$('recorder').hidden=true;$('typeTab').classList.add('active');$('recordTab').classList.remove('active');};
+$('recordTab').onclick=()=>{$('suggestPanel').hidden=true;$('suggestTab').classList.remove('active');$('textPanel').open=false;$('textPanelToggle').hidden=false;$('recorder').hidden=false;$('recordTab').classList.add('active');$('typeTab').classList.remove('active');};
 async function refreshMics(requestPermission=false){
   let temp;
   try{
@@ -38,7 +50,7 @@ async function refreshOutputs(){
 }
 $('refresh').onclick=refreshOutputs;
 async function generate(){
-  if(busy||recording)return;
+  if(busy||recording||autoSession?.pending||chatContextEditing)return;
   const text=$('text').value.trim();if(!text){message('先输入文字或录一段声音。',true);return;}
   busy=true;updateControls();const started=Date.now();$('generate').textContent='正在合成…';message('正在用原始克隆音色合成，请稍等。');
   const progress=setInterval(()=>message(`正在本机合成 · 已等待 ${Math.floor((Date.now()-started)/1000)} 秒`),1000);
@@ -60,11 +72,12 @@ $('play').onclick=async()=>{
   if(!devices.length){message('请选择至少一个输出设备。',true);return;}
   try{await post('/api/play',{clip_id:clip.id,devices});playing=true;updateControls();message($('virtualEnabled').checked?'正在向虚拟麦克风输出克隆语音。':'正在通过所选扬声器播放。');}catch(error){message(error.message,true);}
 };
-$('stop').onclick=async()=>{try{await post('/api/stop',{});message(streaming?'已停止播放，正在取消后续生成…':'已停止播放。');}catch(error){message(error.message,true);}};
+$('stop').onclick=async()=>{micAttempt++;micStarting=false;if(autoSession){autoSession.cancelled=true;autoSession.asrQueue=[];autoSession.ttsQueue=[];autoSession.pending=0;autoSession.controller.abort();}if(autoCapture)await finishAuto(false);updateControls();try{await post('/api/stop',{});message(streaming?'已停止播放，正在取消后续生成…':'已停止播放。');}catch(error){message(error.message,true);}};
 function finishRecording(){ if(recorder?.state==='recording')recorder.stop(); }
 $('recordButton').onclick=async()=>{
-  if(recording){finishRecording();return;}
-  if(busy||playing)return;
+  if(recording){if(autoCapture)await finishAuto(true);else finishRecording();return;}
+  if(busy||playing||autoSession?.pending||micStarting)return;
+  if($('autoMode').checked){await startAuto();return;}
   try{
     const device=$('micSelect').value;
     micStream=await navigator.mediaDevices.getUserMedia({audio:{...(device?{deviceId:{exact:device}}:{}),echoCancellation:true,noiseSuppression:true}});
@@ -103,9 +116,9 @@ function selectedDevices(){
   if($('virtualEnabled').checked&&$('virtualSelect').value!=='')devices.push(Number($('virtualSelect').value));
   return [...new Set(devices)];
 }
-async function streamGenerate(){
-  if(busy||recording||playing)return;
-  const text=$('text').value.trim(),devices=selectedDevices();
+async function streamGenerate(job=null){
+  if(!job&&(busy||recording||playing||autoSession?.pending||chatContextEditing))return;
+  const text=job?job.text:$('text').value.trim(),devices=job?job.devices:selectedDevices();
   if(!text||!devices.length){message('请输入文字，并选择至少一个输出设备。',true);return;}
   busy=true;streaming=true;updateControls();
   $('streamGenerate').textContent='正在准备首段…';
@@ -141,7 +154,96 @@ async function streamGenerate(){
     }
     if(!completed)throw new Error('流式连接中断，请重试。');
   }catch(error){message(error.message,true);await post('/api/stop',{}).catch(()=>{});}
-  finally{busy=false;streaming=false;$('streamGenerate').textContent='▶ 边生成边播放';updateControls();}
+  finally{busy=false;streaming=false;playing=false;$('streamGenerate').textContent='▶ 边生成边播放';updateControls();}
 };
-$('streamGenerate').onclick=streamGenerate;
+$('streamGenerate').onclick=()=>streamGenerate();
 window.addEventListener('pagehide',()=>{if(streaming)navigator.sendBeacon('/api/stop','');});
+
+
+$('autoMode').onchange=()=>{
+  $('recordHint').textContent=$('autoMode').checked?'点击开始，停顿 2 秒自动处理，继续说话进入下一句':'点击开始，说完后点击结束';
+  $('recordTime').textContent=$('autoMode').checked?'自动连续分句':'最长 60 秒';
+};
+async function startAuto(){
+  const devices=selectedDevices(),convert=$('autoConvert').checked;
+  if(convert&&!devices.length){message('请先选择至少一个输出设备。',true);return;}
+  const attempt=++micAttempt;
+  micStarting=true;updateControls();message('正在启动麦克风，请在浏览器提示时允许录音。');
+  let context,stream;
+  try{
+    const device=$('micSelect').value;
+    stream=await navigator.mediaDevices.getUserMedia({audio:{...(device?{deviceId:{exact:device}}:{}),echoCancellation:true,noiseSuppression:true,channelCount:1}});
+    if(attempt!==micAttempt){stream.getTracks().forEach(t=>t.stop());return;}
+    context=new AudioContext();await context.resume();await context.audioWorklet.addModule('/static/mic-worklet.js');
+    if(attempt!==micAttempt){stream.getTracks().forEach(t=>t.stop());await context.close();return;}
+    const source=context.createMediaStreamSource(stream),node=new AudioWorkletNode(context,'mic-capture');
+    const session={asrQueue:[],ttsQueue:[],asrRunning:false,ttsRunning:false,pending:0,cancelled:false,devices,convert,number:0,controller:new AbortController()};
+    autoSession=session;
+    const capture={context,stream,source,node,stopping:false,discard:false};
+    const segmenter=new SilenceSegmenter(context.sampleRate,pcm=>{
+      if(session.cancelled||capture.discard)return;
+      session.asrQueue.push({blob:new Blob([pcmWav(pcm,context.sampleRate)],{type:'audio/wav'}),number:++session.number});
+      session.pending++;updateControls();drainRecognition(session);
+      // Stop capture explicitly when inference cannot keep up; retain all queued utterances.
+      if(session.pending>=12&&!capture.stopping){message('待处理语音已达 12 句，已结束录音，正在依次处理。',true);finishAuto(false);}
+    },{threshold:Number($('sensitivity').value)});
+    capture.segmenter=segmenter;autoCapture=capture;micStream=stream;
+    node.port.onmessage=event=>{
+      if(event.data==='stopped'){capture.resolveStop?.();return;}
+      if(!capture.discard&&!session.cancelled)segmenter.push(event.data);
+    };
+    source.connect(node);node.connect(context.destination);
+    recording=true;seconds=0;$('bars').classList.add('live');$('recordButton').textContent='■ 结束自动录音';
+    $('recordHint').textContent='正在听 · 停顿 2 秒自动分句，处理时可以继续说';$('recordTime').textContent='00:00 · 连续录音';
+    timer=setInterval(()=>{seconds++;$('recordTime').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')} · 连续录音`;},1000);
+    stream.getAudioTracks()[0].onended=()=>{if(!capture.stopping){message('麦克风已断开，正在处理已录入的语音。',true);finishAuto(true);}};
+    message('自动模式已开始。停顿 2 秒会提交本句，下一句会独立录入。');
+  }catch(error){stream?.getTracks().forEach(t=>t.stop());if(context)await context.close().catch(()=>{});message(`自动录音启动失败：${error.message}`,true);}
+  finally{if(attempt===micAttempt)micStarting=false;updateControls();}
+}
+async function finishAuto(submit){
+  const capture=autoCapture;if(!capture||capture.stopping)return;
+  capture.stopping=true;capture.discard=!submit;
+  // Wait for the worklet's final partial block before flushing the final sentence.
+  await new Promise(resolve=>{const timeout=setTimeout(resolve,500);capture.resolveStop=()=>{clearTimeout(timeout);resolve();};capture.node.port.postMessage('stop');});
+  if(submit)capture.segmenter.flush();else capture.segmenter.reset();
+  capture.source.disconnect();capture.node.disconnect();capture.node.port.close();
+  capture.stream.getTracks().forEach(t=>t.stop());await capture.context.close().catch(()=>{});
+  autoCapture=null;micStream=null;recording=false;clearInterval(timer);
+  $('bars').classList.remove('live');$('recordButton').textContent='● 开始录音';$('recordHint').textContent='录音已结束，已提交的语音会继续依次处理';updateControls();
+}
+async function drainRecognition(session){
+  if(session.asrRunning)return;session.asrRunning=true;
+  try{
+    while(session.asrQueue.length&&!session.cancelled){
+      const job=session.asrQueue.shift();
+      try{
+        const body=new FormData();body.append('file',job.blob,'sentence.wav');
+        const data=await api('/api/transcribe',{method:'POST',body,signal:session.controller.signal});
+        if(session.cancelled)break;
+        const text=data.text.trim();
+        if(text){
+          $('text').value=text.slice(0,500);count();
+          if(session.convert){
+            // Long recognition results are spoken in order, without silently truncating words.
+            const texts=text.match(/[\s\S]{1,500}/g);
+            session.pending+=texts.length-1;
+            for(const part of texts)session.ttsQueue.push({text:part,devices:session.devices});
+            drainSpeech(session);
+          }else{session.pending--;message(`第 ${job.number} 句识别完成。`);}
+        }else{session.pending--;message(`第 ${job.number} 句未识别到文字，继续监听。`);}
+      }catch(error){if(!session.cancelled){session.pending--;message(`第 ${job.number} 句识别失败：${error.message}`,true);}}
+      updateControls();
+    }
+  }finally{session.asrRunning=false;updateControls();}
+}
+async function drainSpeech(session){
+  if(session.ttsRunning)return;session.ttsRunning=true;
+  try{
+    while(session.ttsQueue.length&&!session.cancelled){
+      const job=session.ttsQueue.shift();await streamGenerate(job);
+      if(!session.cancelled)session.pending--;updateControls();
+    }
+  }finally{session.ttsRunning=false;updateControls();}
+}
+window.addEventListener('pagehide',()=>{if(autoSession){autoSession.cancelled=true;autoSession.controller.abort();}if(autoCapture){autoCapture.node.disconnect();autoCapture.context.close();}});

@@ -26,6 +26,9 @@ TTS_URL = os.getenv('VOICE_TOOLS_TTS_URL', 'http://127.0.0.1:8031')
 ASR_URL = os.getenv('VOICE_TOOLS_ASR_URL', 'http://127.0.0.1:8032')
 PORT = int(os.getenv('VOICE_TOOLS_PORT', '8030'))
 app = FastAPI(title='Voice Studio', docs_url=None, redoc_url=None)
+from app.suggestions import router as suggestions_router
+app.include_router(suggestions_router)
+
 clips = OrderedDict()
 MAX_CLIPS = 12
 MAX_CLIP_BYTES = 48_000_000

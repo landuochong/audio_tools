@@ -3,3 +3,11 @@
 .generate-row{flex-wrap:wrap;gap:10px}.generate-row>span{flex-basis:100%}
 
 #textPanel{margin-bottom:20px}#textPanelToggle{padding:12px 0;font-size:12px}#textPanelToggle[hidden]{display:none}#textPanel[open] #textPanelToggle:not([hidden]){margin-bottom:12px}
+
+.auto-mode{margin:18px 0 10px}.sensitivity{display:flex;align-items:center;gap:12px;font-size:11px;color:var(--muted)}.sensitivity select{width:auto;margin:0}#queueStatus:empty{display:none}
+
+#suggestPanel{margin-bottom:24px}#conversation{height:150px;font-size:14px}.suggest-fields{display:flex;gap:14px;margin:14px 0}.suggest-fields label{font-size:12px;color:var(--muted)}.suggest-fields label:last-child{flex:1}.suggest-fields select{margin-top:8px}.suggest-fields input{display:block;width:100%;margin-top:8px;background:#131c16;border:1px solid #3c4a3b;border-radius:8px;color:#e7ebe6;padding:11px;font:inherit}.suggest-actions{display:flex;align-items:center;gap:16px}.suggestion-card{padding:16px;margin:12px 0;background:#131c16;border:1px solid #354036;border-radius:12px}.suggestion-card strong{font-size:12px;color:var(--mint)}.suggestion-card p{white-space:pre-wrap;line-height:1.8;font-size:14px}.suggestion-card.selected{border-color:var(--mint)}@media(max-width:740px){.suggest-fields{flex-direction:column}.tabs button{padding:11px 5px;font-size:12px}}
+
+.generate-row[hidden]{display:none}#text{height:155px}#textPanel .textlabel>span{font-size:12px;color:#e7ebe6}#backToChat[hidden]{display:none}.textfooter{margin-bottom:12px}#suggestPanel .suggest-fields{margin-top:0}#suggestionResults summary{font-size:12px}#suggestionResults:not(:has(.suggestion-card)){display:none}.suggestion-card{padding:12px;margin:8px 0}.suggestion-card p{margin:8px 0}.suggestion-card button{padding:7px 12px}
+
+.suggest-options{margin-bottom:12px}.suggest-options[open] .suggest-fields{margin-top:10px}#suggestions{margin-top:12px}.suggestion-line{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:13px 4px;color:#dce6d6;font:inherit;font-size:14px;line-height:1.65;white-space:normal}.suggestion-line::before{content:'▶';color:var(--mint);font-size:10px;margin-right:10px}.suggestion-line:hover:not(:disabled),.suggestion-line.selected{background:#293624;color:var(--mint)}
