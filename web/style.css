@@ -11,3 +11,7 @@
 .generate-row[hidden]{display:none}#text{height:155px}#textPanel .textlabel>span{font-size:12px;color:#e7ebe6}#backToChat[hidden]{display:none}.textfooter{margin-bottom:12px}#suggestPanel .suggest-fields{margin-top:0}#suggestionResults summary{font-size:12px}#suggestionResults:not(:has(.suggestion-card)){display:none}.suggestion-card{padding:12px;margin:8px 0}.suggestion-card p{margin:8px 0}.suggestion-card button{padding:7px 12px}
 
 .suggest-options{margin-bottom:12px}.suggest-options[open] .suggest-fields{margin-top:10px}#suggestions{margin-top:12px}.suggestion-line{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:13px 4px;color:#dce6d6;font:inherit;font-size:14px;line-height:1.65;white-space:normal}.suggestion-line::before{content:'▶';color:var(--mint);font-size:10px;margin-right:10px}.suggestion-line:hover:not(:disabled),.suggestion-line.selected{background:#293624;color:var(--mint)}
+
+.audio-toolbar{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:18px;padding:12px 0;border-top:1px solid var(--line);color:var(--muted)}.audio-toolbar button,.audio-toolbar a{font-size:12px}.audio-toolbar #download{display:inline;margin:0;text-decoration:none}.audio-toolbar a[aria-disabled="true"]{opacity:.38;pointer-events:none}
+
+.voicecard>div:nth-child(2){flex:1;min-width:0}.voicecard #voiceMode{margin-top:7px;width:100%;font-size:13px}.voicecard .badge{white-space:nowrap}.voicecard{min-width:360px}

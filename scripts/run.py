@@ -1,4 +1,4 @@
-"""Start the standalone local UI and two owned model services."""
+"""Start the standalone local UI and three owned model services."""
 import os
 import signal
 import shutil
@@ -53,7 +53,7 @@ except Exception:
     else:
         print('聊天建议需要 Ollama 和本地 qwen3.5:9b 模型；语音功能可继续使用。', flush=True)
 
-services = [('.venv-tts', 'runtime.tts:app', 8031), ('.venv-asr', 'runtime.asr:app', 8032), ('.venv', 'app.main:app', PORT)]
+services = [('.venv-tts', 'runtime.tts:app', 8031), ('.venv-asr', 'runtime.asr:app', 8032), ('.venv-omnivoice', 'runtime.omnivoice_design:app', 8033), ('.venv', 'app.main:app', PORT)]
 for environment, module, port in services:
     if responding(port):
         print(f'复用已运行的本工具服务：{port}', flush=True)

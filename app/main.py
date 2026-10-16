@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
 TTS_URL = os.getenv('VOICE_TOOLS_TTS_URL', 'http://127.0.0.1:8031')
+DESIGN_URL = os.getenv('VOICE_TOOLS_DESIGN_URL', 'http://127.0.0.1:8033')
+VOICE_URLS = {'clone': TTS_URL, 'low_whisper': DESIGN_URL}
 ASR_URL = os.getenv('VOICE_TOOLS_ASR_URL', 'http://127.0.0.1:8032')
 PORT = int(os.getenv('VOICE_TOOLS_PORT', '8030'))
 app = FastAPI(title='Voice Studio', docs_url=None, redoc_url=None)
@@ -65,9 +67,9 @@ async def probe(url):
 
 @app.get('/api/status')
 async def status():
-    tts, asr = await asyncio.gather(probe(TTS_URL), probe(ASR_URL))
+    tts, asr, design = await asyncio.gather(probe(TTS_URL), probe(ASR_URL), probe(DESIGN_URL))
     return {'tts': tts[0], 'asr': asr[0], 'speed': tts[1].get('speed', 1),
-            'model': 'Qwen3-TTS · 原始克隆', 'playback': dict(play_state)}
+            'model': 'Qwen3-TTS · 原始克隆', 'design': design[0], 'design_loaded': design[1].get('loaded', False), 'playback': dict(play_state)}
 
 
 def list_outputs():
@@ -107,6 +109,7 @@ async def transcribe(file: UploadFile = File(...)):
 
 class Synthesize(BaseModel):
     text: str = Field(min_length=1, max_length=500)
+    voice: str = Field(default='clone', pattern='^(clone|low_whisper)$')
 
 
 @app.post('/api/synthesize')
@@ -117,7 +120,7 @@ async def synthesize(payload: Synthesize):
     started = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
-            response = await client.post(TTS_URL + '/synthesize', json={'text': text, 'format': 'wav'})
+            response = await client.post(VOICE_URLS[payload.voice] + '/synthesize', json={'text': text, 'format': 'wav'})
             response.raise_for_status()
         audio, rate = sf.read(io.BytesIO(response.content), dtype='float32', always_2d=True)
         if not len(audio) or not np.isfinite(audio).all():
@@ -144,7 +147,7 @@ def get_clip(identifier):
 @app.get('/api/audio/{identifier}')
 def get_audio(identifier: str):
     data, _, _ = get_clip(identifier)
-    return Response(data, media_type='audio/wav', headers={'Content-Disposition': 'inline; filename="cloned-voice.wav"'})
+    return Response(data, media_type='audio/wav', headers={'Content-Disposition': 'inline; filename="voice-studio.wav"'})
 
 
 class Playback(BaseModel):
@@ -215,6 +218,7 @@ def stop():
 
 class StreamSpeech(BaseModel):
     text: str = Field(min_length=1, max_length=500)
+    voice: str = Field(default='clone', pattern='^(clone|low_whisper)$')
     devices: list[int] = Field(min_length=1, max_length=2)
 
 
@@ -256,7 +260,7 @@ def stream_and_play(payload: StreamSpeech):
         try:
             yield event({'type': 'started'})
             with httpx.Client(timeout=180, trust_env=False) as client:
-                with client.stream('POST', TTS_URL + '/stream', json={'text': text}) as response:
+                with client.stream('POST', VOICE_URLS[payload.voice] + '/stream', json={'text': text}) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
                         if play_stop.is_set():

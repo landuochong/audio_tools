@@ -1,4 +1,20 @@
-let suggestionRequest=null,suggestionVersion=0,chatContext='',replyDraft='';
+let suggestionRequest=null,suggestionVersion=0,chatContext='',replyDraft='',historyEpoch=0;
+const spokenClips=new Set();
+function appendSpokenHistory(text,clipId,epoch){
+  if(epoch!==historyEpoch||spokenClips.has(clipId)||!text.trim())return;
+  spokenClips.add(clipId);
+  if(spokenClips.size>100)spokenClips.delete(spokenClips.values().next().value);
+  if(chatContextEditing)chatContext=$('text').value;
+  const line='我：'+text.trim().replace(/\s*\n\s*/g,' ');
+  chatContext=[chatContext.trimEnd(),line].filter(Boolean).join('\n');
+  let trimmed=false;
+  while(chatContext.length>6000){
+    const boundary=chatContext.indexOf('\n');
+    chatContext=boundary<0?chatContext.slice(-6000):chatContext.slice(boundary+1);trimmed=true;
+  }
+  if(chatContextEditing){$('text').value=chatContext;count();}
+  $('suggestStatus').textContent=trimmed?'已记录刚才播放的话，较早记录已省略；下次建议会参考最近对话。':'已记录刚才播放的话，下次生成建议会参考这句。';
+}
 function editorMode(context){
   chatContextEditing=context;
   $('text').maxLength=context?6000:500;$('textLimit').textContent=context?'6000':'500';
@@ -43,7 +59,7 @@ $('suggestButton').onclick=async()=>{
         if(!devices.length){message('请先选择扬声器或虚拟麦克风。',true);return;}
         for(const item of $('suggestions').children)item.classList.remove('selected');choose.classList.add('selected');
         replyDraft=suggestion.text;
-        await streamGenerate({text:suggestion.text,devices});
+        await streamGenerate({text:suggestion.text,devices,voice:currentVoice()});
       };
       $('suggestions').append(choose);
     }
@@ -54,7 +70,7 @@ $('suggestButton').onclick=async()=>{
 };
 $('clearSuggestions').onclick=()=>{
   suggestionVersion++;suggestionRequest?.abort();suggestionRequest=null;
-  chatContext='';if(chatContextEditing){$('text').value='';count();}$('intention').value='';$('suggestions').replaceChildren();
+  historyEpoch++;spokenClips.clear();chatContext='';if(chatContextEditing){$('text').value='';count();}$('intention').value='';$('suggestions').replaceChildren();
   $('suggestButton').disabled=false;$('suggestButton').textContent='♡ 生成三条建议';
   $('suggestStatus').textContent='聊天记录和建议已清空。';
 };

@@ -75,3 +75,75 @@ test('cancel during ASR never queues or plays late recognition',async()=>{
   const running=vm.runInContext('drainRecognition(session)',c);c.session.cancelled=true;c.session.pending=0;c.complete({text:'不能播放'});await running;
   assert.equal(c.session.ttsQueue.length,0);assert.equal(c.session.pending,0);
 });
+
+test('spoken history preserves edited context, deduplicates clips and respects clear',()=>{
+  const c=appSandbox();
+  vm.runInContext(fs.readFileSync(require.resolve('../web/suggestions.js'),'utf8').replace(/checkSuggestions\(\);\s*$/,''),c);
+  vm.runInContext(`chatContextEditing=true;$('text').value='对方：最近有点累。';appendSpokenHistory('辛苦了。','clip-1',historyEpoch);`,c);
+  assert.equal(vm.runInContext('chatContext',c),'对方：最近有点累。\n我：辛苦了。');
+  vm.runInContext(`appendSpokenHistory('辛苦了。','clip-1',historyEpoch);`,c);
+  assert.equal(vm.runInContext('chatContext.split("\\n").length',c),2);
+  vm.runInContext(`historyEpoch++;chatContext='';$('text').value='';appendSpokenHistory('迟到的播放','clip-2',historyEpoch-1);`,c);
+  assert.equal(vm.runInContext('chatContext',c),'');
+  vm.runInContext(`chatContextEditing=false;appendSpokenHistory('另一页播放','clip-3',historyEpoch);`,c);
+  assert.equal(vm.runInContext('chatContext',c),'我：另一页播放');
+});
+
+test('stream only records successful playback, never cancellation or error',async()=>{
+  for(const type of ['done','cancelled','error']){
+    const c=appSandbox(),recorded=[];c.TextDecoder=TextDecoder;c.Uint8Array=Uint8Array;
+    c.appendSpokenHistory=(...args)=>recorded.push(args);
+    const download=c.document.getElementById('download');download.setAttribute=()=>{};download.removeAttribute=()=>{};
+    c.fetch=async path=>{
+      if(path==='/api/stop')return {ok:true,json:async()=>({})};
+      let sent=false;return {ok:true,body:{getReader:()=>({read:async()=>{
+        if(sent)return {done:true};sent=true;return {done:false,value:new TextEncoder().encode(JSON.stringify({type,id:'test-clip',message:'failed',url:'/api/audio/test'})+'\n')};
+      }})}};
+    };
+    await vm.runInContext(`streamGenerate({text:'实际播放的话',devices:[2]})`,c);
+    assert.equal(recorded.length,type==='done'?1:0);
+    if(recorded.length)assert.equal(recorded[0][0],'实际播放的话');
+  }
+});
+
+test('automatic microphone uses local VAD and queues detected speech at 16 kHz',async()=>{
+  const c=appSandbox();
+  c.setInterval=()=>1;c.clearInterval=()=>{};c.pcmWav=pcmWav;
+  const track={stop(){}};
+  const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
+  c.navigator.mediaDevices={getUserMedia:async()=>stream};
+  c.vad={MicVAD:{new:async options=>{
+    c.options=options;await options.getStream();
+    return {destroy:async()=>{},pause:async()=>{},start:async()=>{}};
+  }}};
+  vm.runInContext('selectedDevices=()=>[1];drainRecognition=()=>{};',c);
+  c.document.getElementById('sensitivity').value='0.35';
+  await vm.runInContext('startAuto()',c);
+  assert.equal(c.options.model,'v5');
+  assert.equal(c.options.redemptionMs,2000);
+  c.options.onSpeechEnd(new Float32Array(16000).fill(.1));
+  const session=vm.runInContext('autoSession',c);
+  assert.equal(session.asrQueue.length,1);
+  const wav=new DataView(await session.asrQueue[0].blob.arrayBuffer());
+  assert.equal(wav.getUint32(24,true),16000);
+  await vm.runInContext('finishAuto(false)',c);
+  c.options.onSpeechEnd(new Float32Array(16000).fill(.1));
+  assert.equal(session.asrQueue.length,1);
+});
+
+test('ending automatic recording submits the final detected speech once',async()=>{
+  const c=appSandbox();c.setInterval=()=>1;c.clearInterval=()=>{};c.pcmWav=pcmWav;
+  const track={stop(){}};const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
+  c.navigator.mediaDevices={getUserMedia:async()=>stream};
+  c.vad={MicVAD:{new:async options=>{
+    c.options=options;await options.getStream();
+    return {destroy:async()=>options.onSpeechEnd(new Float32Array(3200).fill(.1))};
+  }}};
+  vm.runInContext('selectedDevices=()=>[1];drainRecognition=()=>{};',c);
+  c.document.getElementById('sensitivity').value='0.35';
+  await vm.runInContext('startAuto()',c);
+  await vm.runInContext('finishAuto(true)',c);
+  assert.equal(vm.runInContext('autoSession.asrQueue.length',c),1);
+  await vm.runInContext('finishAuto(true)',c);
+  assert.equal(vm.runInContext('autoSession.asrQueue.length',c),1);
+});
