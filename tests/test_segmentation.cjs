@@ -147,3 +147,32 @@ test('ending automatic recording submits the final detected speech once',async()
   await vm.runInContext('finishAuto(true)',c);
   assert.equal(vm.runInContext('autoSession.asrQueue.length',c),1);
 });
+
+test('automatic playback does not feed speaker audio back into the next VAD sentence',async()=>{
+  const c=appSandbox();c.setInterval=()=>1;c.clearInterval=()=>{};c.setTimeout=callback=>{callback();return 1};
+  c.TextDecoder=TextDecoder;c.Uint8Array=Uint8Array;c.pcmWav=pcmWav;
+  const track={stop(){}};const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
+  c.navigator.mediaDevices={getUserMedia:async()=>stream};
+  let listening=true,pauses=0,resumes=0;
+  c.vad={MicVAD:{new:async options=>{
+    c.options=options;await options.getStream();
+    return {pause:async()=>{listening=false;pauses++},start:async()=>{listening=true;resumes++},destroy:async()=>{listening=false}};
+  }}};
+  vm.runInContext('selectedDevices=()=>[1];drainRecognition=()=>{};',c);
+  c.document.getElementById('sensitivity').value='0.35';
+  const download=c.document.getElementById('download');download.setAttribute=()=>{};download.removeAttribute=()=>{};
+  await vm.runInContext('startAuto()',c);
+  c.fetch=async()=>{
+    // Simulate the speaker sound reaching the microphone as playback starts.
+    if(listening)c.options.onSpeechEnd(new Float32Array(16000).fill(.1));
+    const events=[{type:'first_audio',seconds:1},{type:'done',id:'clip',url:'/api/audio/clip'}];
+    let sent=false;return {ok:true,body:{getReader:()=>({read:async()=>{
+      if(sent)return {done:true};sent=true;
+      return {done:false,value:new TextEncoder().encode(events.map(x=>JSON.stringify(x)).join('\n')+'\n')};
+    }})}};
+  };
+  await vm.runInContext("streamGenerate({text:'测试一句',devices:[1],voice:'clone',autoSession})",c);
+  assert.equal(pauses,1);assert.equal(resumes,1);assert.equal(listening,true);
+  assert.equal(vm.runInContext('autoSession.asrQueue.length',c),0);
+  await vm.runInContext('finishAuto(false)',c);
+});

@@ -126,9 +126,10 @@ async function streamGenerate(job=null){
   busy=true;streaming=true;updateControls();
   $('streamGenerate').textContent=voice==='low_whisper'?'正在生成整句…':'正在准备首段…';
   message(voice==='low_whisper'?'低音耳语正在本机生成，完成后自动播放。':'首段就绪后会直接向所选设备播放。');
-  let completed=false;
+  let completed=false,playbackCapture=null;
   const historyVersion=typeof historyEpoch==='undefined'?null:historyEpoch;
   try{
+    if(job?.autoSession)playbackCapture=await suspendAutoCaptureForPlayback(job.autoSession);
     const response=await fetch('/api/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,devices,voice})});
     if(!response.ok){const error=await response.json();throw new Error(typeof error.detail==='string'?error.detail:'流式请求失败');}
     const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
@@ -157,7 +158,7 @@ async function streamGenerate(job=null){
     }
     if(!completed)throw new Error('流式连接中断，请重试。');
   }catch(error){message(error.message,true);await post('/api/stop',{}).catch(()=>{});}
-  finally{busy=false;streaming=false;playing=false;$('streamGenerate').textContent=voice==='low_whisper'?'▶ 生成并播放':'▶ 边生成边播放';updateControls();}
+  finally{if(playbackCapture)await resumeAutoCaptureAfterPlayback(playbackCapture);busy=false;streaming=false;playing=false;$('streamGenerate').textContent=voice==='low_whisper'?'▶ 生成并播放':'▶ 边生成边播放';updateControls();}
 };
 $('streamGenerate').onclick=()=>streamGenerate();
 window.addEventListener('pagehide',()=>{if(streaming)navigator.sendBeacon('/api/stop','');});
@@ -167,6 +168,31 @@ $('autoMode').onchange=()=>{
   $('recordHint').textContent=$('autoMode').checked?'点击开始，停顿 2 秒自动处理，继续说话进入下一句':'点击开始，说完后点击结束';
   $('recordTime').textContent=$('autoMode').checked?'自动连续分句':'最长 60 秒';
 };
+async function suspendAutoCaptureForPlayback(session){
+  const capture=autoCapture;
+  if(!capture||autoSession!==session||capture.stopping)return null;
+  // Native speaker output is outside the browser's echo canceller. Stop VAD
+  // before synthesis/playback starts, so it cannot become another ASR/TTS job.
+  // An unfinished user phrase is flushed by pause().
+  capture.playbackTransition=capture.playbackTransition.then(async()=>{
+    if(!capture.stopping&&!capture.playbackPaused){await capture.vad.pause();capture.playbackPaused=true;$('recordHint').textContent='正在合成与播放 · 麦克风暂停监听，结束后自动恢复';}
+  });
+  try{await capture.playbackTransition;}catch(error){
+    if(!capture.stopping)await finishAuto(false);
+    throw error;
+  }
+  return capture.playbackPaused?capture:null;
+}
+async function resumeAutoCaptureAfterPlayback(capture){
+  // Let the physical speaker's tail decay before listening again.
+  await new Promise(resolve=>setTimeout(resolve,300));
+  capture.playbackTransition=capture.playbackTransition.then(async()=>{
+    if(!capture.stopping&&autoCapture===capture&&capture.playbackPaused){await capture.vad.start();capture.playbackPaused=false;$('recordHint').textContent='正在听 · 停顿 2 秒自动分句，处理时可以继续说';}
+  });
+  try{await capture.playbackTransition;}catch(error){
+    if(!capture.stopping){message(`恢复人声检测失败：${error.message}`,true);await finishAuto(false);}
+  }
+}
 async function startAuto(){
   const devices=selectedDevices(),convert=$('autoConvert').checked,voice=currentVoice();
   if(convert&&!devices.length){message('请先选择至少一个输出设备。',true);return;}
@@ -174,7 +200,7 @@ async function startAuto(){
   const attempt=++micAttempt;
   micStarting=true;updateControls();message('正在加载本地人声检测并启动麦克风…');
   const session={asrQueue:[],ttsQueue:[],asrRunning:false,ttsRunning:false,pending:0,cancelled:false,devices,convert,voice,number:0,controller:new AbortController()};
-  const capture={vad:null,stream:null,stopping:false,discard:false,speaking:false,voicedFrames:0,rolling:false};
+  const capture={vad:null,stream:null,stopping:false,discard:false,speaking:false,voicedFrames:0,rolling:false,playbackPaused:false,playbackTransition:Promise.resolve()};
   const enqueue=pcm=>{
     if(session.cancelled||capture.discard||!pcm.length)return;
     session.asrQueue.push({blob:new Blob([pcmWav(pcm,16000)],{type:'audio/wav'}),number:++session.number});
@@ -226,6 +252,7 @@ async function startAuto(){
 async function finishAuto(submit){
   const capture=autoCapture;if(!capture||capture.stopping)return;
   capture.stopping=true;capture.discard=!submit;
+  try{await capture.playbackTransition;}catch{}
   try{await capture.vad.destroy();}catch(error){message(`结束录音时出错：${error.message}`,true);}
   capture.discard=true;
   capture.stream?.getTracks().forEach(t=>t.stop());
@@ -249,7 +276,7 @@ async function drainRecognition(session){
             // Long recognition results are spoken in order, without silently truncating words.
             const texts=text.match(/[\s\S]{1,500}/g);
             session.pending+=texts.length-1;
-            for(const part of texts)session.ttsQueue.push({text:part,devices:session.devices,voice:session.voice});
+            for(const part of texts)session.ttsQueue.push({text:part,devices:session.devices,voice:session.voice,autoSession:session});
             drainSpeech(session);
           }else{session.pending--;message(`第 ${job.number} 句识别完成。`);}
         }else{session.pending--;message(`第 ${job.number} 句未识别到文字，继续监听。`);}
