@@ -15,3 +15,7 @@
 .audio-toolbar{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:18px;padding:12px 0;border-top:1px solid var(--line);color:var(--muted)}.audio-toolbar button,.audio-toolbar a{font-size:12px}.audio-toolbar #download{display:inline;margin:0;text-decoration:none}.audio-toolbar a[aria-disabled="true"]{opacity:.38;pointer-events:none}
 
 .voicecard>div:nth-child(2){flex:1;min-width:0}.voicecard #voiceMode{margin-top:7px;width:100%;font-size:13px}.voicecard .badge{white-space:nowrap}.voicecard{min-width:360px}
+
+.clone-panel{margin-top:22px}.clone-panel label{display:block;font-size:12px;color:var(--muted);margin:12px 0 7px}.clone-panel input{width:100%;background:#131c16;border:1px solid #3c4a3b;border-radius:8px;color:#e7ebe6;padding:10px;font:inherit;font-size:13px}.clone-panel textarea{height:110px;font-size:13px}.clone-panel audio{display:block;width:100%;margin:12px 0}.clone-panel [hidden]{display:none}.clone-text-label{display:flex;align-items:center;justify-content:space-between;gap:12px}.clone-panel #cloneSave{width:100%}.clone-panel #savedVoice{border-top:1px solid var(--line);margin-top:16px;padding-top:8px}.clone-panel .error{color:#ffb4a7}
+
+@media(max-width:740px){.voicecard{min-width:0;width:100%}}

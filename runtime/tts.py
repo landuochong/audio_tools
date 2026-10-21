@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from mlx_audio.tts.utils import load_model
+from app.voice_profiles import reference_for
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = Path(os.getenv('QWEN_TTS_HOME', str(ROOT.parent / 'VoiceCloneTTS')))
@@ -52,6 +53,7 @@ app = FastAPI(title='Lumi local Qwen3-TTS', lifespan=lifespan)
 class Speech(BaseModel):
     text: str = Field(min_length=1, max_length=1800)
     format: str = Field(default='wav', pattern='^(wav|pcm)$')
+    reference_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{32}$')
 
 
 @app.get('/health')
@@ -60,11 +62,16 @@ async def health():
             'speed': SPEED, 'streaming': SPEED == 1.0}
 
 
-def synthesize(text, audio_format):
+def clone_reference(identifier):
+    return reference_for(identifier) if identifier else (REFERENCE, reference_text)
+
+
+def synthesize(text, audio_format, reference_id=None):
     start = time.perf_counter()
     mx.random.seed(42)
+    ref_audio, ref_text = clone_reference(reference_id)
     pieces = [np.asarray(result.audio, dtype=np.float32) for result in model.generate(
-        text=text, ref_audio=str(REFERENCE), ref_text=reference_text,
+        text=text, ref_audio=str(ref_audio), ref_text=ref_text,
         lang_code='chinese', temperature=0.7, max_tokens=2048, verbose=False)]
     if not pieces:
         raise RuntimeError('No audio generated')
@@ -91,7 +98,7 @@ async def speech(payload: Speech, request: Request):
             raise HTTPException(499, 'Request cancelled')
         # Shield the worker so an HTTP cancellation cannot release the lock while
         # a model job is still running. Disconnected queued jobs are skipped above.
-        future = asyncio.get_running_loop().run_in_executor(worker, synthesize, text, payload.format)
+        future = asyncio.get_running_loop().run_in_executor(worker, synthesize, text, payload.format, payload.reference_id)
         try:
             audio, elapsed = await asyncio.shield(future)
         except asyncio.CancelledError:
@@ -130,8 +137,9 @@ async def stream_speech(payload: Speech, request: Request):
         def produce():
             try:
                 mx.random.seed(42)
-                generator = model.generate(text=payload.text.strip(), ref_audio=str(REFERENCE),
-                    ref_text=reference_text, lang_code='chinese', temperature=.7,
+                ref_audio, ref_text = clone_reference(payload.reference_id)
+                generator = model.generate(text=payload.text.strip(), ref_audio=str(ref_audio),
+                    ref_text=ref_text, lang_code='chinese', temperature=.7,
                     max_tokens=2048, verbose=False, stream=True, streaming_interval=.8)
                 try:
                     for result in generator:

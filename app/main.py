@@ -24,12 +24,14 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parents[1]
 TTS_URL = os.getenv('VOICE_TOOLS_TTS_URL', 'http://127.0.0.1:8031')
 DESIGN_URL = os.getenv('VOICE_TOOLS_DESIGN_URL', 'http://127.0.0.1:8033')
-VOICE_URLS = {'clone': TTS_URL, 'low_whisper': DESIGN_URL}
 ASR_URL = os.getenv('VOICE_TOOLS_ASR_URL', 'http://127.0.0.1:8032')
 PORT = int(os.getenv('VOICE_TOOLS_PORT', '8030'))
 app = FastAPI(title='Voice Studio', docs_url=None, redoc_url=None)
 from app.suggestions import router as suggestions_router
 app.include_router(suggestions_router)
+from app.voices import router as voices_router
+from app.voice_profiles import VOICE_PATTERN, speech_target
+app.include_router(voices_router)
 
 clips = OrderedDict()
 MAX_CLIPS = 12
@@ -109,7 +111,7 @@ async def transcribe(file: UploadFile = File(...)):
 
 class Synthesize(BaseModel):
     text: str = Field(min_length=1, max_length=500)
-    voice: str = Field(default='clone', pattern='^(clone|low_whisper)$')
+    voice: str = Field(default='clone', pattern=VOICE_PATTERN)
 
 
 @app.post('/api/synthesize')
@@ -117,10 +119,11 @@ async def synthesize(payload: Synthesize):
     text = payload.text.strip()
     if not text:
         raise HTTPException(400, '请输入要说的话。')
+    voice_url, reference = speech_target(payload.voice, TTS_URL, DESIGN_URL)
     started = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
-            response = await client.post(VOICE_URLS[payload.voice] + '/synthesize', json={'text': text, 'format': 'wav'})
+            response = await client.post(voice_url + '/synthesize', json={'text': text, 'format': 'wav', **reference})
             response.raise_for_status()
         audio, rate = sf.read(io.BytesIO(response.content), dtype='float32', always_2d=True)
         if not len(audio) or not np.isfinite(audio).all():
@@ -218,7 +221,7 @@ def stop():
 
 class StreamSpeech(BaseModel):
     text: str = Field(min_length=1, max_length=500)
-    voice: str = Field(default='clone', pattern='^(clone|low_whisper)$')
+    voice: str = Field(default='clone', pattern=VOICE_PATTERN)
     devices: list[int] = Field(min_length=1, max_length=2)
 
 
@@ -242,6 +245,7 @@ def stream_and_play(payload: StreamSpeech):
                                      channels=min(2, info['max_output_channels']), dtype='float32')
         except Exception as error:
             raise HTTPException(400, '所选设备不支持流式格式，请使用普通生成播放。') from error
+    voice_url, reference = speech_target(payload.voice, TTS_URL, DESIGN_URL)
     if not play_lock.acquire(blocking=False):
         raise HTTPException(409, '请先停止当前播放。')
     play_stop.clear()
@@ -260,7 +264,7 @@ def stream_and_play(payload: StreamSpeech):
         try:
             yield event({'type': 'started'})
             with httpx.Client(timeout=180, trust_env=False) as client:
-                with client.stream('POST', VOICE_URLS[payload.voice] + '/stream', json={'text': text}) as response:
+                with client.stream('POST', voice_url + '/stream', json={'text': text, **reference}) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
                         if play_stop.is_set():

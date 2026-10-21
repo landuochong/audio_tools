@@ -210,3 +210,34 @@ for(const terminal of ['done','cancelled','error']){
     assert.equal(listening,false);assert.equal(stops,1);assert.equal(resumes,0);
   });
 }
+
+test('automatic microphone fixes the custom clone selection for every queued sentence',async()=>{
+  const c=appSandbox(),spoken=[];
+  c.streamGenerate=async job=>spoken.push({text:job.text,voice:job.voice});
+  vm.runInContext(`
+    globalThis.session={asrQueue:[{blob:new Blob(['one']),number:1},{blob:new Blob(['two']),number:2}],ttsQueue:[],asrRunning:false,ttsRunning:false,pending:2,cancelled:false,convert:true,devices:[2],voice:'clone:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',controller:new AbortController()};
+    autoSession=session;
+    $('voiceMode').value='low_whisper';
+    api=async()=>({text:'自定义声音'});
+  `,c);
+  await vm.runInContext('drainRecognition(session)',c);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(spoken.length,2);
+  assert.ok(spoken.every(job=>job.voice==='clone:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'));
+});
+
+test('streaming requests carry the selected custom clone instead of the default',async()=>{
+  const c=appSandbox();c.TextDecoder=TextDecoder;c.Uint8Array=Uint8Array;
+  const requests=[];
+  c.fetch=async(path,options)=>{
+    requests.push(JSON.parse(options.body));
+    let sent=false;
+    return {ok:true,body:{getReader:()=>({read:async()=>{
+      if(sent)return {done:true};sent=true;
+      return {done:false,value:new TextEncoder().encode('{"type":"cancelled"}\n')};
+    }})}};
+  };
+  await vm.runInContext("streamGenerate({text:'测试音色',devices:[2],voice:'clone:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'})",c);
+  assert.equal(requests.length,1);
+  assert.equal(requests[0].voice,'clone:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+});

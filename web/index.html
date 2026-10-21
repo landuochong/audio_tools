@@ -1,5 +1,5 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>声间 · Voice Studio</title><link rel="stylesheet" href="/static/style.css"></head><body>
-<header><a class="brand" href="/">◒ <span>声间<small>VOICE STUDIO</small></span></a><span class="pill"><i></i> 本机处理 · 不上传录音</span></header>
+<header><a class="brand" href="/">◒ <span>声间<small>VOICE STUDIO</small></span></a><span class="pill"><i></i> 本机处理 · 不上传云端</span></header>
 <main><div class="intro"><div><p class="eyebrow">YOUR WORDS. YOUR VOICE.</p><h1>让想说的话，<br>用喜欢的声音说。</h1><p class="sub">说一句，或者写一句。转换成喜欢的声音，送往扬声器或聊天软件。</p></div><div class="voicecard"><div class="orb">◉</div><div><label for="voiceMode"><small>当前声音</small></label><select id="voiceMode" aria-label="选择声音"><option value="clone">原始克隆音色</option><option value="low_whisper">低音耳语 · OmniVoice</option></select></div><span id="ttsStatus" class="badge">连接中</span></div></div>
 <div class="workspace"><section class="editor panel"><div class="section-title"><h2><span>01</span> 准备你要说的话</h2><span id="asrStatus" class="muted">识别服务连接中</span></div>
 <div class="tabs"><button id="typeTab" class="active" type="button">⌨  输入文字</button><button id="recordTab" type="button">◉  麦克风输入</button><button id="suggestTab" type="button">♡ 聊天建议</button></div>
@@ -18,4 +18,17 @@
 <label class="output-option"><input type="checkbox" id="speakerEnabled" checked><span class="outputicon">◖</span><span><strong>扬声器 / 耳机</strong><small>在这台电脑上听到声音</small></span></label><select id="speakerSelect" aria-label="扬声器输出"></select>
 <div class="divider"></div><label class="output-option"><input type="checkbox" id="virtualEnabled"><span class="outputicon">↗</span><span><strong>虚拟麦克风</strong><small>给其他程序作为麦克风输入</small></span></label><select id="virtualSelect" aria-label="虚拟麦克风输出"></select><p id="virtualHint" class="hint"></p>
 <details id="virtualHelp"><summary>设置虚拟麦克风</summary><ol><li>安装 BlackHole 2ch 驱动。<a href="https://existential.audio/blackhole/" target="_blank" rel="noreferrer">官方说明 ↗</a></li><li>安装后按提示重启电脑，再启动此工具。</li><li>在此勾选「虚拟麦克风」，选择 BlackHole 2ch。</li><li>在聊天程序中，把输入麦克风也选为 BlackHole 2ch。</li></ol><p>项目内提供 <code>安装虚拟麦克风.command</code>，双击安装。系统会要求管理员授权。</p><p>同时勾选扬声器即可边听边发送，无需改变系统默认声音输出。</p></details>
-</section></aside></div><div class="audio-toolbar" role="group" aria-label="播放控制"><button id="stop" class="textbtn" type="button">停止</button><span aria-hidden="true">·</span><button id="play" class="textbtn" type="button" disabled>重播</button><span aria-hidden="true">·</span><a id="download" aria-disabled="true">下载</a></div><footer><span>本地语音工作台 / macOS</span><span>逐句转换 · 非实时变声 · 录音仅保留在本次请求中</span></footer></main><script src="/static/segmentation.js"></script><script src="/static/vendor/vad/ort.wasm.min.js"></script><script src="/static/vendor/vad/bundle.min.js"></script><script src="/static/app.js"></script><script src="/static/suggestions.js"></script></body></html>
+</section><section class="panel clone-panel" aria-labelledby="cloneTitle">
+<div class="section-title"><h2 id="cloneTitle"><span>03</span> 克隆自己的音色</h2></div>
+<p class="hint">上传 3–30 秒清晰的单人录音，建议 5–15 秒，无背景音乐。填写与录音一致的原文，保存后即可在顶部选择。</p>
+<form id="cloneForm">
+<label for="cloneName">音色名称</label><input id="cloneName" maxlength="60" required placeholder="例如：我的声音">
+<label for="cloneFile">参考录音</label><input id="cloneFile" type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" required>
+<audio id="clonePreview" controls hidden preload="none"></audio>
+<div class="clone-text-label"><label for="cloneTranscript">参考录音原文</label><button id="cloneTranscribe" class="textbtn" type="button">自动识别原文</button></div>
+<textarea id="cloneTranscript" maxlength="1000" required placeholder="可先自动识别，再核对并修正。原文准确度会影响克隆效果。"></textarea>
+<button id="cloneSave" type="submit" class="secondary">保存并使用音色</button>
+</form>
+<p id="cloneStatus" class="hint" role="status" aria-live="polite">参考录音和原文仅保存在本项目内，刷新后仍可使用。</p>
+<div id="savedVoice" hidden><p id="savedVoiceInfo" class="hint"></p><audio id="savedVoiceAudio" controls preload="none"></audio><button id="cloneDelete" type="button" class="textbtn">删除当前自定义音色</button></div>
+</section></aside></div><div class="audio-toolbar" role="group" aria-label="播放控制"><button id="stop" class="textbtn" type="button">停止</button><span aria-hidden="true">·</span><button id="play" class="textbtn" type="button" disabled>重播</button><span aria-hidden="true">·</span><a id="download" aria-disabled="true">下载</a></div><footer><span>本地语音工作台 / macOS</span><span>逐句转换 · 非实时变声 · 录音仅保留在本次请求中</span></footer></main><script src="/static/segmentation.js"></script><script src="/static/vendor/vad/ort.wasm.min.js"></script><script src="/static/vendor/vad/bundle.min.js"></script><script src="/static/app.js"></script><script src="/static/suggestions.js"></script><script src="/static/voices.js"></script></body></html>

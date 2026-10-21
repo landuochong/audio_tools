@@ -16,10 +16,11 @@ function updateControls(){
   $('typeTab').disabled=recording||locked; $('recordTab').disabled=locked;
   for(const id of ['autoMode','autoConvert','micSelect','micRefresh','sensitivity'])$(id).disabled=recording||locked;
   $('queueStatus').textContent=pending?`还有 ${autoSession.pending} 句正在处理或排队；录音${recording?'持续进行':'已结束'}。`:'';
+  if(typeof updateCloneControls==='function')updateCloneControls(locked||recording||playing);
 }
 function currentVoice(){return $('voiceMode').value;}
-function voiceName(voice){return voice==='low_whisper'?'低音耳语':'原始克隆音色';}
-function updateVoiceMode(){const design=currentVoice()==='low_whisper';$('streamGenerate').textContent=design?'▶ 生成并播放':'▶ 边生成边播放';if(!busy)message(design?'低音耳语会在整句生成后自动播放；首次使用需要加载模型。':'已切换到原始克隆音色。');}
+function voiceName(voice){return [...($('voiceMode').options||[])].find(option=>option.value===voice)?.textContent||(voice==='low_whisper'?'低音耳语':'原始克隆音色');}
+function updateVoiceMode(){const design=currentVoice()==='low_whisper';$('streamGenerate').textContent=design?'▶ 生成并播放':'▶ 边生成边播放';if(!busy)message(design?'低音耳语会在整句生成后自动播放；首次使用需要加载模型。':`已切换到${voiceName(currentVoice())}。`);}
 $('voiceMode').onchange=updateVoiceMode;
 function count(){ $('count').textContent=$('text').value.length; }
 $('text').addEventListener('input',count);
