@@ -148,31 +148,65 @@ test('ending automatic recording submits the final detected speech once',async()
   assert.equal(vm.runInContext('autoSession.asrQueue.length',c),1);
 });
 
-test('automatic playback does not feed speaker audio back into the next VAD sentence',async()=>{
-  const c=appSandbox();c.setInterval=()=>1;c.clearInterval=()=>{};c.setTimeout=callback=>{callback();return 1};
-  c.TextDecoder=TextDecoder;c.Uint8Array=Uint8Array;c.pcmWav=pcmWav;
-  const track={stop(){}};const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
-  c.navigator.mediaDevices={getUserMedia:async()=>stream};
-  let listening=true,pauses=0,resumes=0;
-  c.vad={MicVAD:{new:async options=>{
-    c.options=options;await options.getStream();
-    return {pause:async()=>{listening=false;pauses++},start:async()=>{listening=true;resumes++},destroy:async()=>{listening=false}};
-  }}};
-  vm.runInContext('selectedDevices=()=>[1];drainRecognition=()=>{};',c);
-  c.document.getElementById('sensitivity').value='0.35';
-  const download=c.document.getElementById('download');download.setAttribute=()=>{};download.removeAttribute=()=>{};
-  await vm.runInContext('startAuto()',c);
-  c.fetch=async()=>{
-    // Simulate the speaker sound reaching the microphone as playback starts.
-    if(listening)c.options.onSpeechEnd(new Float32Array(16000).fill(.1));
-    const events=[{type:'first_audio',seconds:1},{type:'done',id:'clip',url:'/api/audio/clip'}];
-    let sent=false;return {ok:true,body:{getReader:()=>({read:async()=>{
-      if(sent)return {done:true};sent=true;
-      return {done:false,value:new TextEncoder().encode(events.map(x=>JSON.stringify(x)).join('\n')+'\n')};
-    }})}};
-  };
-  await vm.runInContext("streamGenerate({text:'测试一句',devices:[1],voice:'clone',autoSession})",c);
-  assert.equal(pauses,1);assert.equal(resumes,1);assert.equal(listening,true);
-  assert.equal(vm.runInContext('autoSession.asrQueue.length',c),0);
-  await vm.runInContext('finishAuto(false)',c);
-});
+for(const terminal of ['done','cancelled','error']){
+  test(`microphone retains speech during synthesis and playback (${terminal})`,async()=>{
+    const c=appSandbox();c.setInterval=()=>1;c.clearInterval=()=>{};
+    c.TextDecoder=TextDecoder;c.Uint8Array=Uint8Array;c.pcmWav=pcmWav;
+    let listening=true,pauses=0,resumes=0,stops=0;
+    const track={stop(){stops++}};
+    const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
+    c.navigator.mediaDevices={getUserMedia:async()=>stream};
+    c.vad={MicVAD:{new:async options=>{
+      c.options=options;await options.getStream();
+      return {
+        pause:async()=>{listening=false;pauses++},
+        start:async()=>{listening=true;resumes++},
+        destroy:async()=>{listening=false;options.onSpeechEnd(new Float32Array(3200).fill(.3))},
+      };
+    }}};
+    // Exercise actual VAD enqueue and ASR, holding the TTS queue for inspection.
+    vm.runInContext('selectedDevices=()=>[1];drainSpeech=()=>{};',c);
+    c.document.getElementById('autoConvert').checked=true;
+    c.document.getElementById('sensitivity').value='0.35';
+    const download=c.document.getElementById('download');download.setAttribute=()=>{};download.removeAttribute=()=>{};
+    const heard=[];
+    c.api=async(path,options)=>{
+      if(path==='/api/transcribe'){
+        const wav=new DataView(await options.body.get('file').arrayBuffer());
+        heard.push(wav.getInt16(44,true));return {text:'句子'+heard.length};
+      }
+      return {};
+    };
+    await vm.runInContext('startAuto()',c);
+    let beginPlayback,readEvent;
+    c.fetch=()=>new Promise(resolve=>{beginPlayback=()=>resolve({ok:true,body:{getReader:()=>({
+      read:()=>new Promise(resolve=>{readEvent=resolve}),
+    })}})});
+    const running=vm.runInContext("streamGenerate({text:'上一句',devices:[1],voice:'clone',autoSession})",c);
+    const settle=()=>new Promise(resolve=>setImmediate(resolve));
+    const speak=async value=>{
+      assert.equal(listening,true);
+      c.options.onSpeechEnd(new Float32Array(16000).fill(value));
+      await settle();
+    };
+    // A new sentence while the stream request is still preparing audio.
+    await speak(.1);
+    beginPlayback();await settle();
+    readEvent({done:false,value:new TextEncoder().encode(JSON.stringify({type:'first_audio',seconds:1})+'\n')});
+    await settle();
+    // Another sentence after playback starts, before it completes.
+    await speak(.2);
+    assert.equal(vm.runInContext('recording',c),true);
+    assert.equal(stops,0);assert.equal(pauses,0);assert.equal(resumes,0);
+    // Ending capture during playback still flushes the unfinished user phrase.
+    await vm.runInContext('finishAuto(true)',c);await settle();
+    assert.deepEqual(heard,[3277,6553,9830]);
+    assert.deepEqual(Array.from(vm.runInContext('autoSession.ttsQueue.map(job=>job.text)',c)),['句子1','句子2','句子3']);
+    assert.equal(vm.runInContext('autoSession.pending',c),3);
+    readEvent({done:false,value:new TextEncoder().encode(JSON.stringify({type:terminal,id:'clip',url:'/api/audio/clip',message:'failed'})+'\n')});
+    await settle();
+    if(terminal!=='error')readEvent({done:true});
+    await running;
+    assert.equal(listening,false);assert.equal(stops,1);assert.equal(resumes,0);
+  });
+}
