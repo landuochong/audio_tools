@@ -126,3 +126,24 @@ API：`GET /api/voices` 列表、`POST /api/voices` 创建（表单 `name`、`re
 本项目原创代码采用 [Apache License 2.0](LICENSE) 许可证（`Apache-2.0`）。
 
 第三方代码、依赖和模型仍遵循各自的许可证；本项目许可证不替代其授权条款。仓库内附带的 VAD 前端组件使用 [ISC 许可证](web/vendor/vad/vad-LICENSE)，ONNX Runtime 使用 [MIT 许可证](web/vendor/vad/onnxruntime-LICENSE)。
+
+## 支持项目
+
+如果声间对你有帮助，欢迎点一个 Star，或自愿打赏支持项目的持续维护与开发。感谢每一份支持！
+
+使用支付宝或微信扫描下方收款码即可打赏，金额随心。点击图片可查看原图。
+
+<table>
+  <tr>
+    <th>支付宝</th>
+    <th>微信支付</th>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <a href="docs/assets/donate/alipay.jpeg"><img src="docs/assets/donate/alipay.jpeg" alt="支付宝打赏收款码" width="240"></a>
+    </td>
+    <td align="center" valign="top">
+      <a href="docs/assets/donate/wechat-pay.jpeg"><img src="docs/assets/donate/wechat-pay.jpeg" alt="微信支付打赏收款码" width="240"></a>
+    </td>
+  </tr>
+</table>
